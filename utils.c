@@ -1,12 +1,18 @@
-// utils.c
 #include "philo.h"
 
-/* Function to check if a string is a positive integer */
-bool is_positive_integer(char *str)
+/*
+ * utils.c
+ *
+ * This file contains:
+ * - Argument parsing
+ * - Timestamp function
+ */
+
+static bool is_positive_integer(char *str)
 {
     int i = 0;
 
-    if (!str)
+    if (!str || str[0] == '\0')
         return false;
     while (str[i])
     {
@@ -17,30 +23,51 @@ bool is_positive_integer(char *str)
     return true;
 }
 
-/* Function to convert string to long and validate */
+/* Validate that all arguments are positive and meaningful */
+static bool validate_params(t_params *params)
+{
+    if (params->number_of_philosophers <= 0)
+        return false;
+    if (params->time_to_die <= 0)
+        return false;
+    if (params->time_to_eat <= 0)
+        return false;
+    if (params->time_to_sleep <= 0)
+        return false;
+    if (params->must_eat_count && params->number_of_times_each_philosopher_must_eat <= 0)
+        return false;
+    return true;
+}
+
 bool parse_arguments(int argc, char **argv, t_params *params)
 {
     if (argc != 5 && argc != 6)
         return false;
+
     for (int i = 1; i < argc; i++)
     {
         if (!is_positive_integer(argv[i]))
             return false;
     }
+
     params->number_of_philosophers = atoi(argv[1]);
     params->time_to_die = atol(argv[2]);
     params->time_to_eat = atol(argv[3]);
     params->time_to_sleep = atol(argv[4]);
+
     if (argc == 6)
     {
         params->number_of_times_each_philosopher_must_eat = atoi(argv[5]);
         params->must_eat_count = true;
     }
     else
+    {
         params->must_eat_count = false;
-    return true;
+    }
+
+    return validate_params(params);
 }
-// utils.c (add the following function)
+
 long get_timestamp_in_ms(void)
 {
     struct timeval tv;

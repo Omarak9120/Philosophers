@@ -35,6 +35,7 @@ void set_death(t_table *table)
 }
 
 /* Philosopher routine */
+// philosopher.c (update philosopher_routine)
 void *philosopher_routine(void *arg)
 {
     t_philosopher *philo = (t_philosopher *)arg;
@@ -67,11 +68,24 @@ void *philosopher_routine(void *arg)
 
         // Release forks
         pthread_mutex_unlock(philo->left_fork);
-        pthread_mutex_unlock(philo->right_fork);
+        pthread_mutex_unlock(philo->right_fork);       
 
         // Sleeping
         log_action(table, philo->id, "is sleeping");
         usleep(table->params.time_to_sleep * 1000);
     }
     return NULL;
+}
+
+// philosopher.c (add the following function)
+bool create_philosopher_threads(t_table *table)
+{
+    int i;
+
+    for (i = 0; i < table->params.number_of_philosophers; i++)
+    {
+        if (pthread_create(&table->philosophers[i].thread, NULL, philosopher_routine, &table->philosophers[i]) != 0)
+            return false;
+    }
+    return true;
 }

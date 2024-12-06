@@ -8,14 +8,21 @@ bool init_forks(t_table *table)
 
     table->forks = malloc(sizeof(pthread_mutex_t) * table->params.number_of_philosophers);
     if (!table->forks)
+    {
+        printf("Error: Memory allocation for forks failed.\n");
         return false;
+    }
     for (i = 0; i < table->params.number_of_philosophers; i++)
     {
         if (pthread_mutex_init(&table->forks[i], NULL) != 0)
+        {
+            printf("Error: Mutex initialization failed for fork %d.\n", i);
             return false;
+        }
     }
     return true;
 }
+
 
 /* Initialize philosophers */
 bool init_philosophers(t_table *table)
@@ -30,7 +37,7 @@ bool init_philosophers(t_table *table)
         table->philosophers[i].id = i + 1;
         table->philosophers[i].left_fork = &table->forks[i];
         table->philosophers[i].right_fork = &table->forks[(i + 1) % table->params.number_of_philosophers];
-        table->philosophers[i].last_meal_time = 0;
+        table->philosophers[i].last_meal_time = table->start_time;
         table->philosophers[i].meals_eaten = 0;
         table->philosophers[i].table = table;
     }
@@ -52,11 +59,16 @@ bool initialize_table(t_table *table)
 {
     if (!init_forks(table))
         return false;
+
+    // Set the start_time here, before init_philosophers
+    table->start_time = get_timestamp_in_ms();
+    table->someone_died = false;
+
     if (!init_philosophers(table))
         return false;
     if (!init_mutexes(table))
         return false;
-    table->start_time = get_timestamp_in_ms(); // Function to be implemented in utils.c
-    table->someone_died = false;
+
     return true;
 }
+
