@@ -1,91 +1,95 @@
-// philosopher.c
 #include "philo.h"
+#include <unistd.h>
+#include <stdio.h>
 
-/* Function to print log messages safely */
 void log_action(t_table *table, int philosopher_id, char *action)
 {
-    long timestamp;
+    // Check someone_died under data_mutex
+    pthread_mutex_lock(&table->data_mutex);
+    bool died = table->someone_died;
+    pthread_mutex_unlock(&table->data_mutex);
 
     pthread_mutex_lock(&table->writing_mutex);
-    if (!table->someone_died)
-    {
-        timestamp = get_timestamp_in_ms() - table->start_time;
+    if (!died) {
+        long timestamp = get_timestamp_in_ms() - table->start_time;
         printf("%ld %d %s\n", timestamp, philosopher_id, action);
     }
     pthread_mutex_unlock(&table->writing_mutex);
 }
 
-/* Function to check if someone has died */
-bool has_someone_died(t_table *table)
+static void think(t_philosopher *philo)
 {
-    bool died;
-
-    pthread_mutex_lock(&table->death_mutex);
-    died = table->someone_died;
-    pthread_mutex_unlock(&table->death_mutex);
-    return died;
+    log_action(philo->table, philo->id, "is thinking");
 }
 
-/* Function to set the death flag */
-void set_death(t_table *table)
+static void eat(t_philosopher *philo)
 {
-    pthread_mutex_lock(&table->death_mutex);
-    table->someone_died = true;
-    pthread_mutex_unlock(&table->death_mutex);
+    pthread_mutex_t *first;
+    pthread_mutex_t *second;
+
+    // Determine fork order based on IDs to maintain consistent lock ordering
+    // Let's say always lock the fork with the smaller address (or index) first
+    if (philo->left_fork < philo->right_fork)
+    {
+        first = philo->left_fork;
+        second = philo->right_fork;
+    }
+    else
+    {
+        first = philo->right_fork;
+        second = philo->left_fork;
+    }
+
+    // Lock first fork
+    pthread_mutex_lock(first);
+    log_action(philo->table, philo->id, "has taken a fork");
+
+    // Lock second fork
+    pthread_mutex_lock(second);
+    log_action(philo->table, philo->id, "has taken a fork");
+
+    pthread_mutex_lock(&philo->table->data_mutex);
+    philo->last_meal_time = get_timestamp_in_ms();
+    pthread_mutex_unlock(&philo->table->data_mutex);
+
+    log_action(philo->table, philo->id, "is eating");
+    usleep(philo->table->params.time_to_eat * 1000);
+
+    pthread_mutex_lock(&philo->table->data_mutex);
+    philo->meals_eaten++;
+    pthread_mutex_unlock(&philo->table->data_mutex);
+
+    // Unlock in reverse order
+    pthread_mutex_unlock(second);
+    pthread_mutex_unlock(first);
 }
 
-/* Philosopher routine */
-// philosopher.c (update philosopher_routine)
+
+static void my_sleep(t_philosopher *philo)
+{
+    log_action(philo->table, philo->id, "is sleeping");
+    usleep(philo->table->params.time_to_sleep * 1000);
+}
+
 void *philosopher_routine(void *arg)
 {
     t_philosopher *philo = (t_philosopher *)arg;
-    t_table *table = philo->table;
-
+    // Even philosophers start slightly later to reduce deadlock chance
     if (philo->id % 2 == 0)
-        usleep(100); // Slight delay for even-numbered philosophers to prevent deadlock
+        usleep(100);
 
-    while (!has_someone_died(table))
-    {
-        // Thinking
-        log_action(table, philo->id, "is thinking");
-
-        // Taking forks
-        pthread_mutex_lock(philo->left_fork);
-        log_action(table, philo->id, "has taken a fork");
-        pthread_mutex_lock(philo->right_fork);
-        log_action(table, philo->id, "has taken a fork");
-
-        // Eating
-        pthread_mutex_lock(&table->death_mutex);
-        philo->last_meal_time = get_timestamp_in_ms();
-        pthread_mutex_unlock(&table->death_mutex);
-
-        log_action(table, philo->id, "is eating");
-        usleep(table->params.time_to_eat * 1000); // Convert ms to us
-
-        // Update meals eaten
-        philo->meals_eaten += 1;
-
-        // Release forks
-        pthread_mutex_unlock(philo->left_fork);
-        pthread_mutex_unlock(philo->right_fork);       
-
-        // Sleeping
-        log_action(table, philo->id, "is sleeping");
-        usleep(table->params.time_to_sleep * 1000);
+    while (!has_someone_died(philo->table)) {
+        think(philo);
+        eat(philo);
+        if (philo->table->params.must_eat_count) {
+            pthread_mutex_lock(&philo->table->data_mutex);
+            bool done = (philo->meals_eaten >= philo->table->params.number_of_times_each_philosopher_must_eat);
+            pthread_mutex_unlock(&philo->table->data_mutex);
+            if (done)
+                break;
+        }
+        my_sleep(philo);
     }
+
     return NULL;
-}
-
-// philosopher.c (add the following function)
-bool create_philosopher_threads(t_table *table)
-{
-    int i;
-
-    for (i = 0; i < table->params.number_of_philosophers; i++)
-    {
-        if (pthread_create(&table->philosophers[i].thread, NULL, philosopher_routine, &table->philosophers[i]) != 0)
-            return false;
-    }
-    return true;
 }
