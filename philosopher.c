@@ -74,7 +74,21 @@ static void my_sleep(t_philosopher *philo)
 void *philosopher_routine(void *arg)
 {
     t_philosopher *philo = (t_philosopher *)arg;
-    // Even philosophers start slightly later to reduce deadlock chance
+
+    // Special case: only one philosopher
+    if (philo->table->params.number_of_philosophers == 1) {
+        pthread_mutex_lock(philo->left_fork);
+        log_action(philo->table, philo->id, "has taken a fork");
+        // Philosopher cannot take second fork, waits until time_to_die
+        usleep(philo->table->params.time_to_die * 1000);
+        log_action(philo->table, philo->id, "died");
+        pthread_mutex_unlock(philo->left_fork);
+        // Set someone_died flag
+        set_death(philo->table);
+        return NULL;
+    }
+
+    // To reduce chance of deadlock, stagger philosopher start
     if (philo->id % 2 == 0)
         usleep(100);
 
@@ -83,10 +97,11 @@ void *philosopher_routine(void *arg)
         eat(philo);
         if (philo->table->params.must_eat_count) {
             pthread_mutex_lock(&philo->table->data_mutex);
-            bool done = (philo->meals_eaten >= philo->table->params.number_of_times_each_philosopher_must_eat);
-            pthread_mutex_unlock(&philo->table->data_mutex);
-            if (done)
+            if (philo->meals_eaten >= philo->table->params.number_of_times_each_philosopher_must_eat) {
+                pthread_mutex_unlock(&philo->table->data_mutex);
                 break;
+            }
+            pthread_mutex_unlock(&philo->table->data_mutex);
         }
         my_sleep(philo);
     }
