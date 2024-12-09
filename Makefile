@@ -1,9 +1,9 @@
-NAME = philo
+NAME = philosopher
 
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -pthread
+CFLAGS = -Wall -Wextra -Werror -pthread -g
 
-SRCS = main.c philosopher.c utils.c init.c cleanup.c monitor.c
+SRCS = main.c philosopher.c init.c utils.c utils_extra.c monitor.c
 OBJS = $(SRCS:.c=.o)
 
 all: $(NAME)
@@ -18,5 +18,3 @@ fclean: clean
 	rm -f $(NAME)
 
 re: fclean all
-
-.PHONY: all clean fclean re

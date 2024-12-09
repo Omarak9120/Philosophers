@@ -1,61 +1,79 @@
-#include "philo.h"
-#include <ctype.h>
-#include <sys/time.h>
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   utils.c                                            :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: oabdelka <oabdelka@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/12/09 12:29:33 by oabdelka          #+#    #+#             */
+/*   Updated: 2024/12/09 12:29:33 by oabdelka         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
 
-bool is_positive_integer(char *str)
+#include "philosopher.h"
+
+int	ft_atoi(const char *str)
 {
-    if (!str || !*str)
-        return false;
-    for (int i = 0; str[i]; i++) {
-        if (!isdigit((unsigned char)str[i]))
-            return false;
-    }
-    return true;
+	long	result;
+	int		sign;
+
+	result = 0;
+	sign = 1;
+	while (*str == ' ' || (*str >= '\t' && *str <= '\r'))
+		str++;
+	if (*str == '-' || *str == '+')
+	{
+		if (*str == '-')
+			sign = -1;
+		str++;
+	}
+	while (*str >= '0' && *str <= '9')
+	{
+		result = result * 10 + (*str - '0');
+		if (sign == 1 && result > INT_MAX)
+			return (-1);
+		if (sign == -1 && (-result) < INT_MIN)
+			return (-1);
+		str++;
+	}
+	return ((int)(result * sign));
 }
 
-bool parse_arguments(int argc, char **argv, t_params *params)
+long int	current_timestamp(void)
 {
-    if (argc != 5 && argc != 6)
-        return false;
-    for (int i = 1; i < argc; i++) {
-        if (!is_positive_integer(argv[i]))
-            return false;
-    }
+	struct timeval	tv;
 
-    params->number_of_philosophers = atoi(argv[1]);
-    params->time_to_die = atol(argv[2]);
-    params->time_to_eat = atol(argv[3]);
-    params->time_to_sleep = atol(argv[4]);
-    if (argc == 6) {
-        params->number_of_times_each_philosopher_must_eat = atoi(argv[5]);
-        params->must_eat_count = true;
-    } else {
-        params->must_eat_count = false;
-    }
-
-    return true;
+	gettimeofday(&tv, NULL);
+	return ((tv.tv_sec * 1000) + (tv.tv_usec / 1000));
 }
 
-long get_timestamp_in_ms(void)
+void	accurate_sleep(long int time_in_ms, t_simulation *simulation)
 {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (tv.tv_sec * 1000 + tv.tv_usec / 1000);
+	long int	start_time;
+
+	start_time = current_timestamp();
+	while (current_timestamp() - start_time < time_in_ms)
+	{
+		if (has_any_philosopher_died(simulation))
+			break ;
+		if (has_simulation_end(simulation))
+			break ;
+		usleep(100);
+	}
 }
 
-void set_death(t_table *table)
+void	log_philosopher_action(int id, t_simulation *simulation, char *action)
 {
-    pthread_mutex_lock(&table->data_mutex);
-    table->someone_died = true;
-    pthread_mutex_unlock(&table->data_mutex);
-}
-
-bool has_someone_died(t_table *table)
-{
-    bool died;
-
-    pthread_mutex_lock(&table->data_mutex);
-    died = table->someone_died;
-    pthread_mutex_unlock(&table->data_mutex);
-    return died;
+	pthread_mutex_lock(&(simulation->print));
+	if (!has_any_philosopher_died(simulation))
+	{
+		if (!has_simulation_end(simulation))
+		{
+			printf("%ld %d %s\n",
+				current_timestamp() - simulation->start_time,
+				id,
+				action);
+		}
+	}
+	pthread_mutex_unlock(&(simulation->print));
 }

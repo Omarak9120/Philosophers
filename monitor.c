@@ -1,64 +1,98 @@
-#include "philo.h"
-#include <unistd.h>
-#include <stdio.h>
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   monitor.c                                          :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: oabdelka <oabdelka@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/12/09 13:35:44 by oabdelka          #+#    #+#             */
+/*   Updated: 2024/12/09 13:35:44 by oabdelka         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
 
-void *monitor_routine(void *arg)
+#include "philosopher.h"
+
+int	has_any_philosopher_died(t_simulation *simulation)
 {
-    t_table *table = (t_table *)arg;
-    int i;
-
-    while (!has_someone_died(table)) {
-        int completed_eaters = 0;
-        for (i = 0; i < table->params.number_of_philosophers; i++) {
-            pthread_mutex_lock(&table->data_mutex);
-            long current_time = get_timestamp_in_ms();
-            long time_since_last_meal = current_time - table->philosophers[i].last_meal_time;
-
-            if (time_since_last_meal > table->params.time_to_die && !table->someone_died) {
-                // Philosopher died
-                table->someone_died = true;
-                pthread_mutex_unlock(&table->data_mutex);
-                log_action(table, table->philosophers[i].id, "died");
-                return NULL;
-            }
-
-            // printf("Philosopher %d has eaten %d times.\n", i+1, table->philosophers[i].meals_eaten);
-
-
-            if (table->params.must_eat_count &&
-                table->philosophers[i].meals_eaten >= table->params.number_of_times_each_philosopher_must_eat)
-            {
-                completed_eaters++;
-            }
-
-            pthread_mutex_unlock(&table->data_mutex);
-        }
-
-        if (table->params.must_eat_count && completed_eaters == table->params.number_of_philosophers) {
-            pthread_mutex_lock(&table->data_mutex);
-            table->someone_died = true; // Signal everyone to stop
-            pthread_mutex_unlock(&table->data_mutex);
-            return NULL;
-        }
-        usleep(1000);
-    }
-    return NULL;
+	pthread_mutex_lock(&simulation->m_died);
+	if (simulation->died)
+	{
+		pthread_mutex_unlock(&simulation->m_died);
+		return (1);
+	}
+	pthread_mutex_unlock(&simulation->m_died);
+	return (0);
 }
 
-bool create_philosopher_threads(t_table *table)
+int	has_simulation_end(t_simulation *sim)
 {
-    for (int i = 0; i < table->params.number_of_philosophers; i++) {
-        if (pthread_create(&table->philosophers[i].thread, NULL, philosopher_routine, &table->philosophers[i]) != 0)
-            return false;
-    }
-    return true;
+	pthread_mutex_lock(&sim->m_end);
+	if (sim->end)
+	{
+		pthread_mutex_unlock(&sim->m_end);
+		return (1);
+	}
+	pthread_mutex_unlock(&sim->m_end);
+	return (0);
 }
 
-bool monitor_philosophers(t_table *table)
+static int	have_all_philosophers_eaten(t_philo *philo)
 {
-    pthread_t monitor_thread;
-    if (pthread_create(&monitor_thread, NULL, monitor_routine, table) != 0)
-        return false;
-    pthread_join(monitor_thread, NULL);
-    return true;
+	pthread_mutex_lock(&philo->simulation->eat);
+	if (philo->eat_count >= philo->simulation->meals_required)
+	{
+		pthread_mutex_unlock(&philo->simulation->eat);
+		return (1);
+	}
+	pthread_mutex_unlock(&philo->simulation->eat);
+	return (0);
+}
+
+static void	check_end_condition(t_simulation *simulation)
+{
+	int	i;
+
+	i = 0;
+	while (simulation->meals_required != -1 && i < simulation->num_philosophers
+		&& have_all_philosophers_eaten(&simulation->philo[i]))
+		i++;
+	if (i == simulation->num_philosophers)
+	{
+		pthread_mutex_lock(&simulation->m_end);
+		simulation->end = 1;
+		pthread_mutex_unlock(&simulation->m_end);
+		pthread_mutex_lock(&simulation->print);
+		printf("number of meals eaten: %d\n",
+			simulation->meals_required);
+		pthread_mutex_unlock(&simulation->print);
+	}
+}
+
+void	monitor_death(t_simulation *simulation)
+{
+	int	i;
+
+	while (!has_simulation_end(simulation))
+	{
+		i = -1;
+		while (
+			++i < simulation->num_philosophers
+			&& !has_any_philosopher_died(simulation)
+		)
+		{
+			pthread_mutex_lock(&simulation->meal);
+			if (
+				(current_timestamp() - simulation->philo[i].lastmeal)
+				> simulation->time_to_die
+			)
+			{
+				handle_philosopher_death(simulation, i);
+			}
+			pthread_mutex_unlock(&simulation->meal);
+			usleep(200);
+		}
+		if (has_any_philosopher_died(simulation))
+			break ;
+		check_end_condition(simulation);
+	}
 }

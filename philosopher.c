@@ -1,110 +1,107 @@
-#include "philo.h"
-#include <unistd.h>
-#include <stdio.h>
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   philosopher.c                                      :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: oabdelka <oabdelka@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2024/12/09 13:16:24 by oabdelka          #+#    #+#             */
+/*   Updated: 2024/12/09 13:16:24 by oabdelka         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
 
-void log_action(t_table *table, int philosopher_id, char *action)
+#include "philosopher.h"
+
+void	*single_philosopher_routine(void *philo_void)
 {
-    // Check someone_died under data_mutex
-    pthread_mutex_lock(&table->data_mutex);
-    bool died = table->someone_died;
-    pthread_mutex_unlock(&table->data_mutex);
+	t_philo	*philo;
 
-    pthread_mutex_lock(&table->writing_mutex);
-    if (!died) {
-        long timestamp = get_timestamp_in_ms() - table->start_time;
-        printf("%ld %d %s\n", timestamp, philosopher_id, action);
-    }
-    pthread_mutex_unlock(&table->writing_mutex);
+	philo = (t_philo *)philo_void;
+	log_philosopher_action(
+		philo->id,
+		philo->simulation,
+		"has taken a fork."
+		);
+	usleep(philo->simulation->time_to_die * 1000);
+	log_philosopher_action(
+		philo->id,
+		philo->simulation,
+		"died."
+		);
+	return (NULL);
 }
 
-static void think(t_philosopher *philo)
+static int	acquire_fork_mutex(t_fork *fork, t_philo *philo)
 {
-    log_action(philo->table, philo->id, "is thinking");
+	pthread_mutex_lock(&fork->mutex);
+	if (!fork->philo_take)
+	{
+		log_philosopher_action(
+			philo->id,
+			philo->simulation,
+			"has taken a fork."
+			);
+		fork->philo_take = philo->id;
+	}
+	if (fork->philo_take == philo->id)
+	{
+		pthread_mutex_unlock(&fork->mutex);
+		return (1);
+	}
+	pthread_mutex_unlock(&fork->mutex);
+	return (0);
 }
 
-static void eat(t_philosopher *philo)
+static void	release_fork_mutex(t_fork *fork)
 {
-    pthread_mutex_t *first;
-    pthread_mutex_t *second;
-
-    // Determine fork order based on IDs to maintain consistent lock ordering
-    // Let's say always lock the fork with the smaller address (or index) first
-    if (philo->left_fork < philo->right_fork)
-    {
-        first = philo->left_fork;
-        second = philo->right_fork;
-    }
-    else
-    {
-        first = philo->right_fork;
-        second = philo->left_fork;
-    }
-
-    // Lock first fork
-    pthread_mutex_lock(first);
-    log_action(philo->table, philo->id, "has taken a fork");
-
-    // Lock second fork
-    pthread_mutex_lock(second);
-    log_action(philo->table, philo->id, "has taken a fork");
-
-    pthread_mutex_lock(&philo->table->data_mutex);
-    philo->last_meal_time = get_timestamp_in_ms();
-    pthread_mutex_unlock(&philo->table->data_mutex);
-
-    log_action(philo->table, philo->id, "is eating");
-    usleep(philo->table->params.time_to_eat * 1000);
-
-    pthread_mutex_lock(&philo->table->data_mutex);
-    philo->meals_eaten++;
-    pthread_mutex_unlock(&philo->table->data_mutex);
-
-    // Unlock in reverse order
-    pthread_mutex_unlock(second);
-    pthread_mutex_unlock(first);
+	pthread_mutex_lock(&fork->mutex);
+	fork->philo_take = 0;
+	pthread_mutex_unlock(&fork->mutex);
 }
 
-
-static void my_sleep(t_philosopher *philo)
+static void	philosopher_eat(t_philo *philo)
 {
-    log_action(philo->table, philo->id, "is sleeping");
-    usleep(philo->table->params.time_to_sleep * 1000);
+	while (1)
+	{
+		if (acquire_fork_mutex(&philo->simulation->fork[philo->left_fork],
+				philo))
+			break ;
+		usleep(100);
+	}
+	while (1)
+	{
+		if (acquire_fork_mutex(&philo->simulation->fork[philo->right_fork],
+				philo))
+			break ;
+		usleep(100);
+	}
+	pthread_mutex_lock(&philo->simulation->meal);
+	log_philosopher_action(philo->id, philo->simulation, "is eating.");
+	philo->lastmeal = current_timestamp();
+	pthread_mutex_unlock(&philo->simulation->meal);
+	accurate_sleep(philo->simulation->time_to_eat, philo->simulation);
+	pthread_mutex_lock(&philo->simulation->eat);
+	philo->eat_count++;
+	pthread_mutex_unlock(&philo->simulation->eat);
+	release_fork_mutex(&philo->simulation->fork[philo->left_fork]);
+	release_fork_mutex(&philo->simulation->fork[philo->right_fork]);
 }
 
-void *philosopher_routine(void *arg)
+void	*philosopher_thread(void *philo_void)
 {
-    t_philosopher *philo = (t_philosopher *)arg;
+	t_philo	*philo;
 
-    // Special case: only one philosopher
-    if (philo->table->params.number_of_philosophers == 1) {
-        pthread_mutex_lock(philo->left_fork);
-        log_action(philo->table, philo->id, "has taken a fork");
-        // Philosopher cannot take second fork, waits until time_to_die
-        usleep(philo->table->params.time_to_die * 1000);
-        log_action(philo->table, philo->id, "died");
-        pthread_mutex_unlock(philo->left_fork);
-        // Set someone_died flag
-        set_death(philo->table);
-        return NULL;
-    }
-
-    // To reduce chance of deadlock, stagger philosopher start
-    if (philo->id % 2 == 0)
-        usleep(100);
-
-    while (!has_someone_died(philo->table)) {
-        think(philo);
-        eat(philo);
-        if (philo->table->params.must_eat_count) {
-            pthread_mutex_lock(&philo->table->data_mutex);
-            if (philo->meals_eaten >= philo->table->params.number_of_times_each_philosopher_must_eat) {
-                pthread_mutex_unlock(&philo->table->data_mutex);
-                break;
-            }
-            pthread_mutex_unlock(&philo->table->data_mutex);
-        }
-        my_sleep(philo);
-    }
-
-    return NULL;
+	philo = (t_philo *)philo_void;
+	if (philo->id % 2 == 0)
+		usleep(1500);
+	while (!has_any_philosopher_died(philo->simulation))
+	{
+		philosopher_eat(philo);
+		if (has_simulation_end(philo->simulation))
+			break ;
+		log_philosopher_action(philo->id, philo->simulation, "is sleeping.");
+		accurate_sleep(philo->simulation->time_to_sleep, philo->simulation);
+		log_philosopher_action(philo->id, philo->simulation, "is thinking.");
+	}
+	return (NULL);
 }
